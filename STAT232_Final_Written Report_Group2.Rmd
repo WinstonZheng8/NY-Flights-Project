@@ -1,0 +1,1341 @@
+---
+title: "STAT232_Written Report_Group2"
+author: "Ting-Yu Liu, Kele Xie, Nhi Truong, Winston Zheng"
+date: "2025-03-10"
+output:
+  html_document:
+    toc: yes
+  pdf_document:
+    toc: yes
+team: 'Group2: overachievers'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# **Executive Summary**
+
+## Overview
+Flight delays and cancellations remain a significant challenge in the aviation industry, impacting both airlines and passengers. This study leverages data-driven methods, including exploratory data analysis and predictive modeling, to identify key factors influencing delays and cancellations. By analyzing flight performance, weather conditions, and operational factors, we develop machine learning models to predict delays and cancellations with improved accuracy.
+
+## Key Findings
+1. **Weather’s Role in Flight Operations**:
+   - Weather conditions have a **weak correlation with delay times** but are a **strong predictor of cancellations**.
+   - **Wind speed, humidity, and visibility significantly impact cancellations**, while **temperature and precipitation show limited influence**.
+
+2. **Delay Trends & Influencing Factors**:
+   - **Evening flights experience the highest delays**, likely due to accumulated disruptions throughout the day.
+   - **Winter months show higher delays**, particularly at congested airports.
+
+3. **Machine Learning for Delay Prediction**:
+   - Multiple Linear Regression (MLR) and polynomial models struggled to predict delays effectively due to the complexity of operational factors.
+   - Forward selection identified **time of day, wind speed, humidity, and airport congestion** as the strongest predictors.
+   
+4. **Cancellation Predictive Modeling**:
+   - A **logistic regression model achieved 97.2% accuracy** in predicting cancellations, with key predictors being **weather conditions, time of day, seasonality, and airport congestion**.
+   - **Flights from EWR and LGA are more likely to be canceled**, reinforcing the role of airport congestion in disruptions.
+
+
+
+### Packages
+```{r}
+library(tidyverse)
+library(nycflights13)
+library(dplyr)
+library(gridExtra)
+library(ggplot2)
+library(ggcorrplot)
+library(scales)
+```
+# **Introduction**
+
+  - Flight delays are a common inconvenience in air travel, impacting both passengers and airline operations. The `nycflights13` dataset provides detailed records of flights departing from New York City airports in 2013. This project aims to analyze flight delays/cancellations, identify contributing factors, and explore predictive models for better decision-making.
+
+```{r, echo=FALSE}
+glimpse(flights)
+```
+
+```{r, echo=FALSE}
+glimpse(weather)
+```
+
+**Missing value**
+
+- We merge these two data sets together by "origin", "month", "day" and "hour" columns.
+- Then, we clean the data set. Since canceled flights typically lack departure and arrival delay records, we identify and exclude these records.
+- Remove missing values from temp, dewp, humid, and wind_speed.
+- Because wind_gust, pressure, and wind_dir contain a significant number of missing values, we removed them. Otherwise, too many missing values could lead to potential data integrity issues.
+
+```{r}
+#all_flights_weather: keep all missing value
+all_flights_weather <- merge(flights, weather, by = c("origin", "month", "day", "hour","year","time_hour"))
+
+flights_weather <- filter(all_flights_weather, !is.na(dep_delay), !is.na(arr_delay))
+
+flights_weather <- filter(flights_weather, !is.na(temp), !is.na(dewp), !is.na(humid), !is.na(wind_speed))
+
+flights_weather <- flights_weather |>
+    dplyr::select(-wind_gust, -pressure, -wind_dir)
+
+dim(flights_weather)
+```
+
+# **Research Aims & Sub-questions**
+## Research Aim 1. Evaluating Airline On-Time Performance
+To assess airline reliability, we consider two key performance measures:
+
+- **Probability of Delay**: The likelihood that a flight is delayed, representing overall reliability.
+- **Average Delay for Delayed Flights**: The average delay time for flights that experience delays, indicating severity.
+
+**Methodology:**
+- We exclude airlines with fewer than 10,000 flights to ensure a representative sample.
+- The analysis considers both delay probability and severity to determine performance rankings.
+
+**Findings:**
+
+- **Worst-performing airlines:** EV (Endeavor Air) and WN (Southwest Airlines) exhibit the highest delay probabilities and longest delays.
+- **Best-performing airlines:** AA (American Airlines) and DL (Delta Air Lines) demonstrate superior on-time performance with lower delay probabilities and shorter delay durations.
+
+### Identifying Airlines with the Most and Least Delays
+We examine the worst and best airlines based on average delay times for both departure and arrival delays.
+
+#### **Top 5 Airlines for Departure Delays**
+- **Worst performers:** F9 (Frontier), EV (Endeavor), YV (Mesa), FL (AirTran), WN (Southwest)
+- **Best performers:** US (US Airways), HA (Hawaiian), AS (Alaska), AA (American), DL (Delta)
+
+#### **Top 5 Airlines for Arrival Delays**
+- **Worst performers:** F9 (Frontier), FL (AirTran), EV (Endeavor), YV (Mesa), OO (SkyWest)
+- **Best performers:** AS (Alaska), HA (Hawaiian), AA (American), DL (Delta), VX (Virgin America)
+
+These rankings highlight key differences in airline performance, suggesting that operational efficiency, scheduling strategies, and weather adaptability play a role in on-time performance.
+
+
+```{r}
+#departure and arrived delay
+mean_delay <- flights_weather |>
+  group_by(carrier) |>
+  summarize(mean_dep_delay = mean(dep_delay),
+            mean_arr_delay = mean(arr_delay))|>
+  arrange(desc(mean_dep_delay))
+
+
+print(mean_delay)
+```
+
+```{r}
+#Top 5 -dep_delay
+#The worst
+flights_weather |>
+  group_by(carrier) |>
+  summarize(mean_dep_delay = mean(dep_delay))|>
+  arrange(desc(mean_dep_delay))|>
+  slice(1:5)
+```
+```{r}
+#Top 5 -dep_delay
+#The best
+flights_weather |>
+  group_by(carrier) |>
+  summarize(mean_dep_delay = mean(dep_delay))|>
+  arrange(mean_dep_delay)|>
+  slice(1:5)
+```
+
+```{r}
+#Top 5 -arr_delay
+#The worst
+flights_weather |>
+  group_by(carrier) |>
+  summarize(mean_arr_delay = mean(arr_delay))|>
+  arrange(desc(mean_arr_delay))|>
+  slice(1:5)
+```
+
+
+```{r}
+#Top 5 -arr_delay
+#The best
+flights_weather |>
+  group_by(carrier) |>
+  summarize(mean_arr_delay = mean(arr_delay))|>
+  arrange(mean_arr_delay)|>
+  slice(1:5)
+```
+
+```{r, echo=FALSE}
+library(ggplot2)
+
+ggplot(mean_delay, aes(x = reorder(carrier, mean_dep_delay))) +
+  geom_bar(aes(y = mean_dep_delay, fill = "Departure Delay"), 
+           stat = "identity", position = position_dodge(width = 0.8), width = 0.6) +
+  geom_bar(aes(y = mean_arr_delay, fill = "Arrival Delay"), 
+           stat = "identity", position = position_dodge(width = 0.8), width = 0.6, alpha = 0.6) + # Add transparency
+  labs(title = "Average Departure and Arrival Delays by Carrier",
+       x = "Carrier",
+       y = "Mean Delay (minutes)",
+       fill = "Type of Delay") +
+  theme_minimal() +
+  scale_fill_manual(values = c("Departure Delay" = "#FF6F61",  
+                               "Arrival Delay" = "#6B5B95")) +  
+  coord_flip() 
+
+```
+
+  
+### Which airlines have the highest and lowest probability of delay?
+
+### Findings
+#### **Probability of Departure Delay**
+- **Highest probability of delay:**
+  1. WN (Southwest Airlines)
+  2. UA (United Airlines)
+  3. EV (Endeavor Air)
+
+- **Lowest probability of delay:**
+  1. US (US Airways)
+  2. AA (American Airlines)
+  3. MQ (Envoy Air)
+
+#### **Probability of Arrival Delay**
+- **Highest probability of delay:**
+  1. EV (Endeavor Air)
+  2. MQ (Envoy Air)
+  3. WN (Southwest Airlines)
+
+- **Lowest probability of delay:**
+  1. AA (American Airlines)
+  2. DL (Delta Airlines)
+  3. US (US Airways)
+
+```{r}
+delay_Probability <- flights_weather |>
+  group_by(carrier) |>
+  summarize(
+    total_flights = n(),
+    delayed_flights = sum(dep_delay > 0, na.rm = TRUE),
+    arr_delayed_flights = sum(arr_delay > 0, na.rm = TRUE),
+    dep_delay_percentage = (delayed_flights / total_flights) * 100,
+    arr_delay_percentage = (arr_delayed_flights / total_flights) * 100)|>
+    arrange(desc(arr_delay_percentage))
+
+delay_Probability
+```
+
+```{r, echo=FALSE}
+delay_percentages <- flights_weather %>%
+  group_by(carrier) %>%
+  summarize(dep_delay_pct = mean(dep_delay > 0, na.rm = TRUE) * 100,
+            arr_delay_pct = mean(arr_delay > 0, na.rm = TRUE) * 100)
+
+ggplot(delay_percentages, aes(x = reorder(carrier, dep_delay_pct))) +
+  geom_bar(aes(y = dep_delay_pct, fill = "Departure Delay %"), 
+           stat = "identity", position = position_dodge(width = 0.8), width = 0.6) +
+  geom_bar(aes(y = arr_delay_pct, fill = "Arrival Delay %"), 
+           stat = "identity", position = position_dodge(width = 0.8), width = 0.6, alpha = 0.6) + # Add transparency
+  labs(title = "Percentage of Delayed Flights by Carrier",
+       x = "Carrier",
+       y = "Delay Percentage (%)",
+       fill = "Type of Delay") +
+  theme_minimal() +
+  scale_fill_manual(values = c("Departure Delay %" = "#FFA07A",  # Light salmon
+                               "Arrival Delay %" = "#4682B4")) + # Steel blue
+  coord_flip() # Flip coordinates for better
+
+```
+
+#### Dealing with small N problem of each carrier, we removed the carriers who had total flights in 2013 were less than 10,000.
+
+```{r}
+filter_carriers<-delay_Probability|>
+  filter(total_flights>10000)
+
+remove_small<-delay_Probability|>
+  filter(carrier %in% filter_carriers$carrier)
+```
+
+```{r}
+#Top 3 -dep_delay%
+#The worst
+remove_small |>
+  arrange(desc(dep_delay_percentage))|>
+  slice(1:3)
+```
+
+
+```{r}
+#Top 3 -dep_delay%
+#The best
+remove_small |>
+  arrange(dep_delay_percentage)|>
+  slice(1:3)
+```
+
+```{r}
+#Top 3 -arr_delay%
+#The worst
+remove_small |>
+  arrange(desc(arr_delay_percentage))|>
+  slice(1:3)
+```
+
+```{r}
+#Top 3 -arr_delay%
+#The best
+remove_small |>
+  arrange(arr_delay_percentage)|>
+  slice(1:3)
+```
+
+
+
+## Research Aim 2. Analyze Key Factors Influencing Flight Delays
+
+correlation coefficient heatmap
+
+```{r, echo=FALSE}
+# Select only numeric columns
+numeric_df <- flights_weather[, sapply(flights_weather, is.numeric)]
+
+# Remove redundant variables
+numeric_df <- numeric_df[, !colnames(numeric_df) %in% c("year", "flight", "dep_time", "sched_dep_time", "arr_time", "sched_arr_time")]
+
+# Compute correlation matrix
+cor_matrix <- cor(numeric_df, use = "complete.obs")
+
+# Improved correlation heatmap
+ggcorrplot(cor_matrix, 
+           lab = TRUE,          
+           lab_size = 2.5,     
+           tl.cex = 0.8,        
+           tl.srt = 90,        
+           colors = c("blue", "white", "red"),  
+           outline.col = "black",
+           title = "Correlation Heatmap") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 75, hjust = 1, vjust = 0.5))  
+
+```
+
+### Do Weather Conditions Impact Flight Delays?
+One of the key considerations in flight delay analysis is whether weather conditions, such as wind speed, precipitation, and temperature, play a significant role in predicting flight delays.
+
+#### Findings from Correlation Analysis
+
+A heatmap of correlation coefficients was generated to examine the relationship between weather conditions and flight delays. The results indicate that:
+
+- **Weather variables (wind speed, precipitation, temperature, humidity, and visibility) do not show strong linear correlations with departure or arrival delays.**
+- **Departure and arrival delays have a high correlation (around 0.91), indicating that delays are often carried over from departure to arrival.**
+
+Given the weak correlation between weather variables and flight delays, additional exploratory techniques were used to further investigate their impact.
+
+### Alternative Approaches to Assess Weather Impact
+Since weather conditions may have non-linear or threshold-based effects on flight delays, we employed the following additional analyses:
+
+#### **1. Outlier Detection in Wind Speed**
+- Checked for extreme wind speeds to determine whether unusually high winds lead to flight delays.
+- Identified potential thresholds where wind speed might start affecting delays.
+
+#### **2. Transforming Weather Variables into Binary Categories**
+- Converted **precipitation** into a binary variable (rain/no rain) to capture extreme weather conditions.
+- Categorized **visibility** into low vs. high visibility to examine its influence on delays.
+
+#### **3. Exploring Non-Linear Relationships**
+- Created scatter plots to visually inspect potential non-linear relationships between weather conditions and delays.
+         
+#### **Way1, 2**
+
+
+```{r, echo=FALSE}
+b1 <- ggplot(flights_weather, aes(y = temp)) +
+  geom_boxplot(fill = "green", alpha = 0.5) +
+  theme_minimal() + ggtitle("Boxplot of Temperature")
+
+b2 <- ggplot(flights_weather, aes(y = wind_speed)) +
+  geom_boxplot(fill = "orange", alpha = 0.5) +
+  theme_minimal() + ggtitle("Boxplot of Wind Speed")
+
+b3 <- ggplot(flights_weather, aes(y = precip)) +
+  geom_boxplot(fill = "purple", alpha = 0.5) +
+  theme_minimal() + ggtitle("Boxplot of Precipitation")
+
+b4 <- ggplot(flights_weather, aes(y = visib)) +
+  geom_boxplot(fill = "red", alpha = 0.5) +
+  theme_minimal() + ggtitle("Boxplot of Visibility")
+
+grid.arrange(b1, b2, b3, b4, ncol = 2, nrow = 2)
+```
+
+```{r, echo=FALSE}
+remove_outliers <- function(df, column) {
+  Q1 <- quantile(df[[column]], 0.25, na.rm = TRUE)
+  Q3 <- quantile(df[[column]], 0.75, na.rm = TRUE)
+  IQR <- Q3 - Q1
+  
+  df <- df[df[[column]] >= (Q1 - 1.5 * IQR) & df[[column]] <= (Q3 + 1.5 * IQR), ]
+  return(df)
+}
+
+
+cleaned_df <- remove_outliers(flights_weather, "wind_speed")
+```
+
+```{r, echo=FALSE}
+cleaned_df$precip <- ifelse(cleaned_df$precip > 0, 1, 0)
+
+cleaned_df$visib <- ifelse(cleaned_df$visib > 0, 1, 0)
+```
+
+```{r, echo=FALSE}
+# Select only numeric columns
+numeric_df <- cleaned_df[, sapply(cleaned_df, is.numeric)]
+
+# Remove redundant variables
+numeric_df <- numeric_df[, !colnames(numeric_df) %in% c("year", "flight", "dep_time", "sched_dep_time", "arr_time", "sched_arr_time")]
+
+# Compute correlation matrix
+cor_matrix <- cor(numeric_df, use = "complete.obs")
+
+# Improved correlation heatmap
+ggcorrplot(cor_matrix, 
+           lab = TRUE,          
+           lab_size = 2.5,      
+           tl.cex = 0.8,       
+           tl.srt = 90,        
+           colors = c("blue", "white", "red"), 
+           outline.col = "black",
+           title = "Correlation Heatmap") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 75, hjust = 1, vjust = 0.5))  
+```
+
+#### Findings from Correlation Analysis
+- The correlation coefficients did not change significantly after did the first two approaches, so we won't use this new data set to do our following analysis.
+
+#### **Way3**
+#### **Findings from Scatter Plots:**
+- **Across all flights, no significant non-linear relationships were found** between weather conditions and delay times.
+- To gain deeper insights, we segmented the data into **worst-performing and best-performing airlines** and compared their scatter plots.
+
+### Comparing Worst and Best Airlines Under Adverse Weather Conditions
+#### **Approach:**
+1. **Subsetting Data:**
+   - Identified the worst-performing airlines (highest average delays) and best-performing airlines (lowest average delays).
+   - Generated scatter plots to observe trends in departure delay time against weather variables.
+2. **Regression Analysis:**
+   - Fitted regression lines for each subset to examine the influence of weather conditions.
+   
+#### **Key Observations:**
+- **Worst-performing airlines** exhibit a **stronger linear relationship** between weather conditions and departure delay times.
+  - Regression lines show steeper slopes, suggesting that weather impacts their flights more significantly.
+  - These airlines may have operational inefficiencies or struggle with schedule adaptability under adverse conditions.
+- **Best-performing airlines** show minimal or no relationship between weather conditions and delays.
+  - This suggests that they have better contingency plans or scheduling strategies to mitigate the effects of weather.
+
+
+Subset-the worst and best airlines
+```{r}
+worst <- flights_weather |>
+  filter(carrier %in% c("EV", "WN"))
+
+best <- flights_weather |>
+  filter(carrier %in% c("AA", "DL"))
+
+```
+
+*All data set VS Subsets-worst & best*
+
+`wind_speed`
+```{r, echo=FALSE}
+all_wind<-ggplot(flights_weather, aes(x=wind_speed, y=dep_delay))+
+  geom_point(alpha = 0.35, position = position_jitter(width = 0.3))+
+  geom_smooth(method = 'lm', se=FALSE, color='red')+
+  scale_x_continuous(breaks = 0:23) +
+  scale_y_continuous(limits = c(-20, 100), oob = scales::squish) +
+  ggtitle("all") +
+  theme_minimal()
+
+worst_wind<-ggplot(worst, aes(x=wind_speed, y=dep_delay))+
+  geom_point(alpha = 0.35, position = position_jitter(width = 0.3))+
+  geom_smooth(method = 'lm', se=FALSE, color='red')+
+  scale_x_continuous(breaks = 0:23) +
+  scale_y_continuous(limits = c(-20, 100), oob = scales::squish) +
+  ggtitle("worst") +
+  theme_minimal()
+
+best_wind<-ggplot(best, aes(x=wind_speed, y=dep_delay))+
+  geom_point(alpha = 0.35, position = position_jitter(width = 0.3))+
+  geom_smooth(method = 'lm', se=FALSE, color='red')+
+  scale_x_continuous(breaks = 0:23) +
+  scale_y_continuous(limits = c(-20, 100), oob = scales::squish) +
+  ggtitle("best") +
+  theme_minimal()
+
+
+grid.arrange(worst_wind, all_wind,best_wind, ncol = 3) 
+```
+
+`precip`
+```{r, echo=FALSE}
+all_rain<-ggplot(flights_weather, aes(x =precip , y = dep_delay)) +
+  geom_point(alpha = 0.5) +  
+  geom_smooth(method='lm',se=FALSE, color='red')+
+  ggtitle("all") +
+  theme_minimal()
+  
+worst_rain<-ggplot(worst, aes(x =precip , y = dep_delay)) +
+  geom_point(alpha = 0.5) +  
+  geom_smooth(method='lm',se=FALSE, color='red')+
+  ggtitle("worst") +
+  theme_minimal() 
+  
+best_rain<-ggplot(best, aes(x =precip , y = dep_delay)) +
+  geom_point(alpha = 0.5) +  
+  geom_smooth(method='lm',se=FALSE, color='red')+
+  ggtitle("best") +
+  theme_minimal() 
+
+grid.arrange(worst_rain, all_rain, best_rain, ncol = 3) 
+  
+```
+
+`visib`
+```{r, echo=FALSE}
+all_visib<-ggplot(flights_weather, aes(x =visib , y = dep_delay)) +
+  geom_point(alpha = 0.5) +  # Scatter plot with transparency
+  geom_smooth(method='lm',se=FALSE, color='red')+
+  ggtitle("all") +
+  theme_minimal()
+  
+worst_visib<-ggplot(worst, aes(x =visib , y = dep_delay)) +
+  geom_point(alpha = 0.5) +  # Scatter plot with transparency
+  geom_smooth(method='lm',se=FALSE, color='red')+
+  ggtitle("worst") +
+  theme_minimal()
+  
+best_visib<-ggplot(best, aes(x =visib , y = dep_delay)) +
+  geom_point(alpha = 0.5) +  # Scatter plot with transparency
+  geom_smooth(method='lm',se=FALSE, color='red')+
+  ggtitle("best") +
+  theme_minimal()
+  
+grid.arrange(worst_visib, all_visib, best_visib, ncol = 3)   
+```
+
+
+
+### How does the time of day and seasonality impact the frequency and severity of flight delays?
+
+#### 1. Influence of Seasonality on Flight Delays
+  convert hour into time period(categorical variable)
+          month into seasons
+```{r}
+new_flight <- flights_weather %>%
+  mutate(season = case_when(
+    month %in% c(3, 4, 5) ~ "Spring",
+    month %in% c(6, 7, 8) ~ "Summer",
+    month %in% c(9, 10, 11) ~ "Fall",
+    TRUE ~ "Winter"  
+  ))
+
+new_flight <- new_flight %>%
+  mutate(time_period = case_when(
+    hour >= 6 & hour < 12 ~ "Morning",
+    hour >= 12 & hour < 18 ~ "Afternoon",
+    TRUE ~ "Evening"
+  ))
+```
+ 
+
+```{r, echo=FALSE}
+flights_weather_worst <- filter(new_flight, carrier %in% c("EV","WN"))
+flights_weather_best <- filter(new_flight, carrier %in% c("AA","DL"))
+```
+
+
+`season`
+
+
+```{r, echo=FALSE}
+all_season <- ggplot(new_flight, aes(y = season, x = dep_delay, fill = season)) +
+  geom_boxplot() +
+  coord_cartesian(xlim = c(-60, 100)) +  
+  labs(title = "All",x=NULL, y=NULL) +
+  theme_minimal()
+
+worst_season <- ggplot(flights_weather_worst, aes(y = season, x = dep_delay, fill = season)) +
+  geom_boxplot() +
+  coord_cartesian(xlim = c(-60, 100)) +
+  labs(title = "Worst",  y = NULL,x=NULL) +
+  theme_minimal()
+
+best_season <- ggplot(flights_weather_best, aes(y = season, x = dep_delay, fill = season)) +
+  geom_boxplot() +
+  coord_cartesian(xlim = c(-60, 100)) +
+  labs(title = "Best", x = "Departure Delay (minutes)", y=NULL) +
+  theme_minimal()
+
+grid.arrange(worst_season, all_season,  best_season, nrow = 3)
+
+
+```
+
+#### Findings from Seasonal Analysis:
+
+- **Winter and Summer experience the longest departure delays** across all airlines, with greater variation in delay times.
+- **Fall generally has the shortest delays**, suggesting fewer weather disruptions and lower air traffic congestion.
+- **Worst-performing airlines (EV, WN) have significantly higher delays in Winter and Summer** compared to best-performing airlines (AA, DL).
+- **Best-performing airlines** maintain more stable delays across all seasons, indicating better scheduling and operational efficiency.
+
+**Interpretation:**
+
+- **Winter delays** may be due to harsh weather conditions, including snowstorms and de-icing requirements.
+- **Summer delays** could be influenced by thunderstorms and increased travel demand, leading to airport congestion.
+- **Airlines with stronger operational management (AA, DL) appear to mitigate seasonal impacts more effectively.**
+
+#### 2. Influence of Time of Day on Flight Delays
+
+
+`time period`
+
+```{r, echo=FALSE}
+all_time_period <- ggplot(new_flight, aes(y = time_period, x = dep_delay, fill = time_period)) +
+  geom_boxplot() +
+  coord_cartesian(xlim = c(-50, 100)) +  
+  labs(title = "All", x = NULL, y = NULL) +
+  theme_minimal()
+
+worst_time_period <- ggplot(flights_weather_worst, aes(y = time_period, x = dep_delay, fill = time_period)) +
+  geom_boxplot() +
+  coord_cartesian(xlim = c(-50, 100)) +
+  labs(title = "Worst", x = NULL, y = NULL) +
+  theme_minimal()
+
+best_time_period <- ggplot(flights_weather_best, aes(y = time_period, x = dep_delay, fill = time_period)) +
+  geom_boxplot() +
+  coord_cartesian(xlim = c(-50, 100)) +
+  labs(title = "Best", x = "Departure Delay (minutes)", y = NULL) +
+  theme_minimal()
+
+grid.arrange(worst_time_period, all_time_period, best_time_period, nrow = 3)
+
+
+```
+
+#### Findings from Time Period Analysis:
+
+- **Evening flights have the highest delays**, especially for worst-performing airlines.
+- **Morning flights experience the least delays**, likely due to fewer cascading effects from earlier flights.
+- **Afternoon delays fall in between, showing moderate delay trends.**
+- **Worst-performing airlines (EV, WN) experience much more severe delays in the evening compared to best-performing airlines (AA, DL).**
+
+- **Winter and Summer require special operational planning** to mitigate seasonal impacts.
+- **Morning flights are the most reliable choice for minimizing delays**, while evening flights are the most prone to disruptions.
+- **Worst-performing airlines should optimize their scheduling and contingency plans** to prevent delays from accumulating throughout the day.
+- **Passengers seeking punctual flights should consider booking morning departures and avoiding peak travel seasons (Winter and Summer).**
+
+
+**Interpretation:**
+
+- **Evening delays** are likely due to accumulated disruptions throughout the day, as delays from earlier flights compound into later departures.
+- **Morning flights benefit from a fresh operational start**, with fewer external disruptions and congestion.
+- **Best-performing airlines manage schedules more efficiently**, minimizing delay propagation throughout the day.
+
+
+### Do specific origin and destination airports contribute to longer flight delays, and what factors might explain these variations?
+  
+```{r, echo=FALSE}
+data <- flights_weather %>%
+  select(arr_delay, dep_delay, carrier, origin, dest, month, day, hour, 
+         sched_dep_time, distance, wind_speed, precip, temp, air_time, flight) %>%
+  drop_na()
+
+# Summary statistics of delays by airport
+origin_delays <- data %>% group_by(origin) %>%
+  summarize(avg_arr_delay = mean(arr_delay, na.rm = TRUE),
+            avg_dep_delay = mean(dep_delay, na.rm = TRUE),
+            num_flights = n()) %>%
+  arrange(desc(avg_arr_delay))
+
+dest_delays <- data %>% group_by(dest) %>%
+  summarize(avg_arr_delay = mean(arr_delay, na.rm = TRUE),
+            avg_dep_delay = mean(dep_delay, na.rm = TRUE),
+            num_flights = n()) %>%
+  arrange(desc(avg_arr_delay))
+
+print(origin_delays)
+print(dest_delays)
+```
+
+
+```{r, echo=FALSE}
+# Origin airport
+ggplot(origin_delays, aes(x = reorder(origin, -avg_dep_delay), y = avg_dep_delay)) +
+  geom_bar(stat = "identity", fill = "lightblue", alpha = 0.7) +
+  labs(title = "Average Departure Delays by Origin Airport", x = "Origin Airport", y = "Avg Departure Delay (min)") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+#### 1. Departure Delays by Origin Airport
+
+#### Findings:
+
+- **EWR (Newark) has the highest average departure delay** among NYC airports, indicating more frequent and severe delays compared to JFK and LGA.
+- **JFK and LGA have relatively lower departure delays**, but they still experience moderate delays.
+- Possible explanations for **EWR’s higher delays** include congestion, air traffic control restrictions, and operational inefficiencies.
+
+**Interpretation:**
+
+- Departure delays at EWR may result from high traffic volume, airspace congestion, and inefficient scheduling.
+- JFK and LGA, while still experiencing delays, might have better infrastructure or scheduling management.
+
+```{r, echo=FALSE}
+# Dest airport
+ggplot(dest_delays, aes(x = reorder(dest, avg_arr_delay), y = avg_arr_delay)) +
+  geom_bar(stat = "identity", fill = "pink", alpha = 0.7) +
+  labs(title = "Average Arrival Delays by Destination Airport", 
+       x = "Destination Airport", y = "Avg Arrival Delay (min)") +
+  coord_flip() + 
+  theme_minimal(base_size = 14) +  
+  theme(axis.text.y = element_text(size = 3)) +  
+  scale_y_continuous(expand = expansion(mult = c(0.02, 0.1)))  
+
+```
+
+
+#### 2. Arrival Delays by Destination Airport
+
+#### Findings:
+
+- **CAE (Columbia Metropolitan Airport) exhibits the highest average arrival delay (~42 min).**
+- Many destination airports with high delays tend to have fewer flights, suggesting **potential airport resource constraints or inefficiencies**.
+- Airports handling fewer flights may have less efficient operations, leading to longer delays.
+
+**Interpretation:**
+
+- **Smaller airports tend to have longer delays**, possibly due to limited infrastructure, fewer runways, or fewer available gates for arrivals.
+- **High departure delays at the origin can lead to increased arrival delays at the destination.**
+
+
+```{r, echo=FALSE}
+filtered_flights <- flights_weather %>%
+  filter(carrier %in% c("EV", "WN"))
+
+worst_carriers <- ggplot(filtered_flights, aes(x = origin, y = dep_delay, fill = carrier)) +
+  geom_boxplot() +
+  labs(title = "EV & WN",
+       x = "Origin Airport",
+       y = "Departure Delay (min)",
+       fill = "Carrier") +
+  theme_minimal()
+
+
+all_carriers <- ggplot(flights_weather, aes(x = origin, y = dep_delay, fill=origin)) +
+  geom_boxplot() +
+  labs(title = "All Carriers",
+       x = "Origin Airport",
+       y = "Departure Delay (min)",
+       fill = "Carrier") +
+  theme_minimal()
+
+grid.arrange(worst_carriers, all_carriers, ncol = 2, widths = c(2, 2))
+
+```
+
+
+#### 3. Comparing Worst-Performing Carriers (EV & WN) to All Carriers
+
+#### Findings:
+
+- While origin airports like EWR and JFK show high delays, these airports alone do not fully explain the poor performance of certain airlines.
+- **EV and WN consistently exhibit higher delays across all three NYC airports**, suggesting that carrier-specific factors, such as fleet management or turnaround time, may contribute to worse performance.
+- **Even in airports where delays are generally lower, EV and WN still underperform**, indicating internal inefficiencies beyond airport-specific challenges.
+
+**Interpretation:**
+
+- **Poor-performing carriers struggle more with delays, even in airports that have moderate overall delay levels.**
+- **This suggests operational inefficiencies within these airlines rather than airport-specific issues being the sole cause.**
+
+
+```{r, echo=FALSE}
+airport_capacity_analysis_all <- flights_weather %>%
+  group_by(dest) %>%
+  summarize(avg_arr_delay = mean(arr_delay, na.rm = TRUE),
+            num_flights = n()) %>%
+  mutate(airport_size = ifelse(num_flights > 1000, "Large Hub", "Small Airport"))
+
+plot_all_carriers <- ggplot(airport_capacity_analysis_all, aes(x = airport_size, y = avg_arr_delay, fill = airport_size)) +
+  geom_boxplot() +
+  labs(title = "All Carriers",
+       x = "Airport Size",
+       y = "Average Arrival Delay (min)")
+
+# Second plot
+airport_capacity_analysis_ev_wn <- flights_weather %>%
+  filter(carrier %in% c("EV", "WN")) %>%
+  group_by(dest) %>%
+  summarize(avg_arr_delay = mean(arr_delay, na.rm = TRUE),
+            num_flights = n()) %>%
+  mutate(airport_size = ifelse(num_flights > 1000, "Large Hub", "Small Airport"))
+
+plot_ev_wn_carriers <- ggplot(airport_capacity_analysis_ev_wn, aes(x = airport_size, y = avg_arr_delay, fill = airport_size)) +
+  geom_boxplot() +
+  labs(title = "EV and WN",
+       x = "Airport Size",
+       y = "Average Arrival Delay (min)")
+
+grid.arrange(plot_all_carriers, plot_ev_wn_carriers, ncol = 2, widths = c(2, 2))
+```
+
+
+#### 4. Airport Size and Its Impact on Arrival Delays
+
+#### Findings:
+
+- **Small airports exhibit greater variability in delays compared to large hubs.**
+- **EV and WN do not experience significantly higher delays than other airlines in large vs. small airports**, suggesting that delays are more influenced by the airport’s capacity rather than the carrier’s performance alone.
+
+**Interpretation:**
+
+- **Airport infrastructure plays a key role in managing delays**, with larger hubs having more efficient systems in place.
+- **Carriers like EV and WN face challenges across all airport sizes**, implying that airline-specific issues contribute to their delay performance rather than just airport congestion.
+
+- **Passengers should consider choosing larger hub airports** when possible to reduce the risk of extreme delays.
+- **Airlines should focus on optimizing operational efficiency** to reduce delays rather than relying solely on airport infrastructure improvements.
+
+### Do Weather Conditions Influence Flight Cancellations?
+
+**Cancel rate**
+
+Since the results from Research Aim 2 indicated that weather variables did not have a strong correlation with delay time, we assume that airlines may choose to cancel flights rather than risk delays in extreme weather conditions. To explore this further, we conducted an exploratory data analysis (EDA) on the cancellation rate under adverse weather conditions.
+
+```{r, echo=FALSE}
+#cancel rate
+# Calculate total cancellation rate
+total_cancel_rate <- sum(is.na(all_flights_weather$arr_delay)) / nrow(flights_weather)
+
+# Calculate cancellation rate in low temperature conditions
+temp_q1 <- quantile(all_flights_weather$temp, probs = 0.25, na.rm = TRUE)
+low_temp_data <- all_flights_weather[which(all_flights_weather$temp < temp_q1), ]
+Low_Temp <- sum(is.na(low_temp_data$arr_delay)) / nrow(low_temp_data)
+
+# Calculate cancellation rate in high wind speed conditions
+wind_speed_q3 <- quantile(all_flights_weather$wind_speed, probs = 0.75, na.rm = TRUE)
+high_wind_speed <- all_flights_weather[which(all_flights_weather$wind_speed > wind_speed_q3), ]
+High_Wind <- sum(is.na(high_wind_speed$arr_delay)) / nrow(high_wind_speed)
+
+# Calculate cancellation rate when there is precipitation
+precip_yes <- all_flights_weather[which(all_flights_weather$precip > 0), ]
+Precipitation <- sum(is.na(precip_yes$arr_delay)) / nrow(precip_yes)
+
+# Calculate cancellation rate in low visibility conditions
+low_visib <- all_flights_weather[which(all_flights_weather$visib < 10), ]
+Low_Visibility <- sum(is.na(low_visib$arr_delay)) / nrow(low_visib)
+
+# Calculate cancellation rate in the lowest visibility condition
+lowest_visib <- all_flights_weather[which(all_flights_weather$visib == min(all_flights_weather$visib)), ]
+sum(is.na(lowest_visib$arr_delay)) / nrow(lowest_visib)
+
+# Calculate cancellation rate in the highest precipitation condition
+max_precip <- all_flights_weather[which(all_flights_weather$precip == max(all_flights_weather$precip)), ]
+sum(is.na(max_precip$arr_delay)) / nrow(max_precip)
+
+```
+```{r, echo=FALSE}
+# Create a data frame with your computed cancellation rates
+weather_cancel_rates <- data.frame(
+  Weather_Condition = c("Low Temp", "High Wind Speed", "Precipitation", "Low Visibility"),
+  Cancel_Rate = c(Low_Temp, High_Wind, Precipitation, Low_Visibility)  # Replace with actual values
+)
+
+cancel_plot<-ggplot(weather_cancel_rates, aes(x = Weather_Condition, y = Cancel_Rate, fill = Weather_Condition)) +
+  geom_bar(stat = "identity") +
+  geom_hline(yintercept = total_cancel_rate, linetype = "dashed", color = "red", size = 1) +
+  scale_y_continuous(labels = percent_format(accuracy = 0.1)) +  # Format y-axis as percentage
+  labs(title = "Flight Cancellation Rate",
+       subtitle = paste("Red dashed line = Overall Cancellation Rate:", round(total_cancel_rate * 100, 1), "%"),
+       x = "Weather Condition",
+       y = "Cancellation Rate") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels for readability
+
+```
+
+```{r, echo=FALSE}
+#delay rate
+total_delay_rate <- length(which(all_flights_weather$dep_delay > 0)) / nrow(all_flights_weather)
+Low_Temp_d <- length(which(low_temp_data$dep_delay > 0)) / nrow(low_temp_data)
+High_Wind_d <- length(which(high_wind_speed$dep_delay > 0)) / nrow(high_wind_speed)
+Precipitation_d <- length(which(precip_yes$dep_delay > 0)) / nrow(precip_yes)
+Low_Visibility_d <- length(which(low_visib$dep_delay > 0)) / nrow(low_visib)
+```
+
+
+```{r, echo=FALSE}
+weather_delay_rates <- data.frame(
+  Weather_Condition = c("Low Temp", "High Wind Speed", "Precipitation", "Low Visibility"),
+  Delay_Rate = c(Low_Temp_d, High_Wind_d, Precipitation_d, Low_Visibility_d)  # Replace with actual values
+)
+
+delay_plot<-ggplot(weather_delay_rates, aes(x = Weather_Condition, y = Delay_Rate, fill = Weather_Condition)) +
+  geom_bar(stat = "identity") +
+  geom_hline(yintercept = total_delay_rate, linetype = "dashed", color = "red", size = 1) +
+  scale_y_continuous(labels = percent_format(accuracy = 0.1)) +  # Format y-axis as percentage
+  labs(title = "Flight Delay Rate",
+       subtitle = paste("Red dashed line = Overall Departure Delay Rate:", round(total_delay_rate * 100, 1), "%"),
+       x = "Weather Condition",
+       y = "Departure Delay Rate") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+grid.arrange(cancel_plot, delay_plot, ncol = 2, widths = c(2, 2))
+```
+
+
+#### Impact of Weather on Flight Cancellations
+
+- **Precipitation and low visibility** pose significant operational challenges, potentially leading to cancellations due to safety concerns (e.g., poor runway conditions, visibility restrictions).
+- **High wind speeds** also contribute to cancellations, likely due to turbulence risks or operational safety margins.
+- **Low temperatures have a lower cancellation impact**, possibly because modern aircraft are well-equipped for cold weather, and de-icing procedures mitigate risks.
+
+#### Impact of Weather on Flight Delays
+
+- **Weather affects flight operations in different ways—while some conditions (like precipitation) result in cancellations, others (like high wind speeds) may increase delay frequency instead.**
+- **Airlines may cancel flights during severe weather rather than delaying them extensively**, particularly in conditions where operational risks are high.
+- **Delays may also be influenced by non-weather factors**, such as air traffic, airline-specific operational efficiency, etc.
+
+***
+## Research Aim 3. Develop Predictive Models for Flight Delays
+
+Categorical reduction & remove redundant variables
+```{r, echo=FALSE}
+airport_capacity_all <- new_flight %>%
+  group_by(dest) %>%
+  summarize(avg_arr_delay = mean(arr_delay, na.rm = TRUE),
+            num_flights = n()) %>%
+  mutate(airport_size = ifelse(num_flights > 1000, "Large Hub", "Small Airport"))
+
+new_flight <- merge(new_flight, airport_capacity_all, by = "dest")
+
+new_flight <- new_flight %>% select(-c("avg_arr_delay","num_flights",
+                                       'dest', 'month', 'hour', 'year', 'time_hour',
+                                       'dep_time',"sched_dep_time","arr_time","sched_arr_time",
+                                      "flight","tailnum", "minute" ))
+
+dim(new_flight)
+```
+
+Convert categorical variables into dummy
+```{r, echo=FALSE}
+# # Creating Dummy Variables
+dummy_flights <- new_flight
+
+# Convert 'airport_size' to binary (0 = Small Airport, 1 = Others)
+dummy_flights$airport_size <- ifelse(dummy_flights$airport_size == "Small Airport", 0, 1)
+
+# Convert categorical variables to factors
+dummy_flights$season <- as.factor(dummy_flights$season)
+dummy_flights$time_period <- as.factor(dummy_flights$time_period)
+dummy_flights$origin <- as.factor(dummy_flights$origin)
+
+# Set reference levels correctly
+dummy_flights$season <- relevel(dummy_flights$season, ref = "Fall")
+dummy_flights$time_period <- relevel(dummy_flights$time_period, ref = "Morning")
+dummy_flights$origin <- relevel(dummy_flights$origin, ref = "JFK") 
+
+# Create dummy variables for categorical features
+season_dummies <- model.matrix(~season, data = dummy_flights)[, -1] 
+time_dummies <- model.matrix(~time_period, data = dummy_flights)[, -1]
+origin_dummies <- model.matrix(~origin, data = dummy_flights)[, -1]
+
+# Combine with the main dataset
+dummy_flights <- cbind(dummy_flights, season_dummies, time_dummies, origin_dummies)
+
+# Drop original categorical columns if needed
+dummy_flights <- dummy_flights %>% select(-season, -time_period, -origin)
+
+```
+
+Categorize delay time into "Delay"(1) or "No Delay"(0)
+```{r, echo=FALSE}
+dummy_flights$dep_delay_status <- ifelse(dummy_flights$dep_delay > 0, 1, 0)
+dummy_flights$arr_delay_status <- ifelse(dummy_flights$arr_delay > 0, 1, 0)
+```
+
+```{r, echo=FALSE}
+worst_dummy_flights<-dummy_flights|>
+  filter(carrier %in% c("EV", "WN"))
+```
+
+
+### Can Machine Learning Models Predict Flight Delays?
+
+We evaluate the effectiveness of predictive models in forecasting flight delays and identifying the most influential factors.
+
+#### Model Selection & Approach
+
+- Focused on **worst-performing airlines (EV, WN)** due to their significant weather-related delays, as the results from research aim 2.
+- Built a **multiple linear regression (MLR) model** using various flight and weather-related predictors.
+
+
+**Predictive model of Departure Delay Time**
+
+**MLR**
+
+All predictors
+```{r, echo=FALSE}
+worst_flights <- worst_dummy_flights %>% dplyr::select(-c(arr_delay, dep_delay_status, arr_delay_status, carrier))
+mod <- lm(dep_delay ~ ., data = worst_flights)
+summary(mod)
+```
+
+**Model Performance**
+
+- **R² = 0.099**, indicating that while predictors explain some variation, delays remain influenced by unobserved factors.
+- The model is useful for **identifying general delay trends**, but further refinement is needed for stronger predictive accuracy.
+
+**Forward selection**
+```{r, echo=FALSE}
+worst_flights <- worst_dummy_flights %>% dplyr::select(-c(arr_delay, airport_size, dep_delay_status, arr_delay_status, carrier))
+set.seed(1)
+train_indices <- sample(1:nrow(worst_flights),
+                        size = nrow(worst_flights)*0.6,
+                        replace = F)
+worst_flights_train <- worst_flights[train_indices,]
+worst_flights_validation <- worst_flights[-train_indices,]
+library(leaps)
+regfit.fwd <- regsubsets(dep_delay ~ .,
+                         data = worst_flights_train,
+                         nvmax = 16,
+                         method = "forward")
+reg.fwd.summary <- summary(regfit.fwd)
+names(reg.fwd.summary)
+plot(reg.fwd.summary$adjr2, xlab = "Number of Variables",
+     ylab = "Adjusted RSq", type = "l")
+which.max(reg.fwd.summary$adjr2)
+points(14, reg.fwd.summary$adjr2[14], col = "red",
+       cex = 2,
+       pch = 20)
+coef(regfit.fwd, 14)
+modMLR_worst <- lm(dep_delay~day+temp+dewp+humid+wind_speed+precip+visib+seasonSpring+seasonSummer+seasonWinter+time_periodAfternoon+time_periodEvening+originEWR+originLGA,
+                     data = worst_flights_train)
+
+summary(modMLR_worst)
+
+predicted <- predict(modMLR_worst, worst_flights_validation)
+
+forecast::accuracy(predicted, worst_flights_validation$dep_delay)
+```
+
+**Model Performance**
+
+- **Adjusted R² = 0.098**, indicating weather and scheduling factors explain some variation in delays but not all.
+- **RMSE = 43.38**, indicating moderate prediction error.
+- **MAE = 27.28**, suggesting that, on average, predictions deviate by ~27 minutes.
+- **MAPE = Inf**, implying inconsistencies due to extreme outliers in the dataset.
+- **Forward selection improves model interpretability**, but delays remain difficult to predict precisely.
+
+
+**Polynomial model**
+
+```{r, echo=FALSE}
+library(boot)
+index <- 3
+names(which(reg.fwd.summary$which[index, -1]))
+lm.fwd3 <- lm(dep_delay ~ humid + time_periodAfternoon + time_periodEvening, data = worst_flights)
+summary(lm.fwd3)
+
+set.seed(232)
+degrees <- 10
+weightedCvMSE <- rep(0, degrees)
+for (d in 1:degrees) {
+mod <- glm(dep_delay ~ poly(humid, d), family = gaussian(), data = worst_flights)
+result <- cv.glm(worst_flights, mod, K = 10)
+weightedCvMSE[d] <- result$delta[1]
+}
+opt_degree <- which.min(weightedCvMSE)
+opt_degree
+
+mod_GAM <- lm(dep_delay ~ poly(humid, 6) + poly(time_periodAfternoon, 1) + poly(time_periodEvening, 1), worst_flights)
+summary(mod_GAM)
+```
+
+**Model Performance**
+
+- **Polynomial regression captures non-linear patterns but does not drastically improve predictive power as adjusted R² = 0.0819**
+
+
+**Predictive model of Departure Delay Status**
+
+**Logistic Regression**
+```{r, echo=FALSE}
+worst_flights_Logistic <- worst_dummy_flights %>% dplyr::select(-c(arr_delay, dep_delay, airport_size, arr_delay_status, carrier))
+set.seed(1)
+train_indices <- sample(1:nrow(worst_flights_Logistic),
+                        size = nrow(worst_flights_Logistic)*0.6,
+                        replace = F)
+worst_flights_Logistic_train <- worst_flights_Logistic[train_indices,]
+worst_flights_Logistic_test <- worst_flights_Logistic[-train_indices,]
+
+full_model <- glm(dep_delay_status ~ ., 
+                  data = worst_flights_Logistic_train, 
+                  family = binomial)
+
+null_model <- glm(dep_delay_status ~ 1, 
+                  data = worst_flights_Logistic_train, 
+                  family = binomial)
+
+forward_model_worstL <- step(null_model, 
+                      scope = list(lower = null_model, upper = full_model), 
+                      direction = "forward", 
+                      trace = F)
+summary(forward_model_worstL)
+
+pred_prob <- predict(forward_model_worstL, 
+                     newdata = worst_flights_Logistic_test,
+                     type = "response")
+
+pred_class <- ifelse(pred_prob > 0.5, 1, 0)
+
+confusion_matrix <- table(Predicted = pred_class, Actual = worst_flights_Logistic_test$dep_delay_status)
+confusion_matrix
+
+accuracy <- mean(pred_class == worst_flights_Logistic_test$dep_delay_status)
+accuracy
+```
+
+**Model Performance**
+
+- **Accuracy = 63.6%**, indicating moderate predictive power.
+- **Weather, scheduling, and seasonal factors contribute to delay probability, but not significant.**
+- **Logistic regression provides useful insights but has limitations in fully capturing flight delays.**
+
+### Can Weather Conditions Predict Flight Cancellations?
+
+**Predictive model of cancel status**
+
+Based on our previous predictive model for `delay time` and the results of the EDA analysis, we found that `delay time` is not strongly related to weather. Therefore, we hypothesize that weather is more closely related to flight cancellations and try to build the predictive model of `cancel status`.
+
+```{r, echo=FALSE}
+all_flights_weather <- merge(flights, weather, by = c("origin", "month", "day", "hour","year","time_hour"))
+
+flights_weather_with_missing <- filter(all_flights_weather, !is.na(temp), !is.na(dewp), !is.na(humid), !is.na(wind_speed))
+
+flights_weather_with_missing <- flights_weather_with_missing |>
+    dplyr::select(-wind_gust, -pressure, -wind_dir)
+
+dim(flights_weather_with_missing)
+```
+
+```{r, echo=FALSE}
+new_flight_with_missing <- flights_weather_with_missing %>%
+  mutate(season = case_when(
+    month %in% c(3, 4, 5) ~ "Spring",
+    month %in% c(6, 7, 8) ~ "Summer",
+    month %in% c(9, 10, 11) ~ "Fall",
+    TRUE ~ "Winter"  
+  ))
+
+new_flight_with_missing <- new_flight_with_missing %>%
+  mutate(time_period = case_when(
+    hour >= 6 & hour < 12 ~ "Morning",
+    hour >= 12 & hour < 18 ~ "Afternoon",
+    TRUE ~ "Evening"
+  ))
+```
+
+categorical reduction & remove redundant variables
+```{r, echo=FALSE}
+airport_capacity_all <- new_flight_with_missing %>%
+  group_by(dest) %>%
+  summarize(avg_arr_delay = mean(arr_delay, na.rm = TRUE),
+            num_flights = n()) %>%
+  mutate(airport_size = ifelse(num_flights > 1000, "Large Hub", "Small Airport"))
+
+new_flight_with_missing <- merge(new_flight_with_missing, airport_capacity_all, by = "dest")
+
+new_flight_with_missing <- new_flight_with_missing |>
+    dplyr::select(-ends_with(".y"))
+
+new_flight_with_missing <- new_flight_with_missing |>
+    rename_with(~gsub("\\.x$", "", .x))
+
+new_flight_with_missing <- new_flight_with_missing %>% dplyr::select(-c("avg_arr_delay","num_flights",
+                                       'dest', 'month', 'hour', 'year', 'time_hour',
+                                  'dep_time',"sched_dep_time","arr_time","sched_arr_time",
+                                      "flight","tailnum", "minute","carrier" ))
+
+dim(new_flight_with_missing)
+```
+
+```{r, echo=FALSE}
+#create new column for cancel status
+new_flight_with_missing$cancel_status<-ifelse(is.na(new_flight_with_missing$arr_delay),1,0)
+
+#drop arr_delay, dep_delay
+new_flight_with_missing <- new_flight_with_missing %>% dplyr::select(-c("arr_delay", "dep_delay","air_time" ))
+```
+
+convert categorical variables into dummy
+```{r, echo=FALSE}
+# # Creating Dummy Variables
+dummy_flights_with_missing <- new_flight_with_missing
+
+# Convert 'airport_size' to binary (0 = Small Airport, 1 = Others)
+dummy_flights_with_missing$airport_size <- ifelse(dummy_flights_with_missing$airport_size == "Small Airport", 0, 1)
+
+# Convert categorical variables to factors
+dummy_flights_with_missing$season <- as.factor(dummy_flights_with_missing$season)
+dummy_flights_with_missing$time_period <- as.factor(dummy_flights_with_missing$time_period)
+dummy_flights_with_missing$origin <- as.factor(dummy_flights_with_missing$origin)
+
+# Set reference levels correctly
+dummy_flights_with_missing$season <- relevel(dummy_flights_with_missing$season, ref = "Fall")
+dummy_flights_with_missing$time_period <- relevel(dummy_flights_with_missing$time_period, ref = "Morning")
+dummy_flights_with_missing$origin <- relevel(dummy_flights_with_missing$origin, ref = "JFK")  # Reference should be an airport
+
+# Create dummy variables for categorical features
+season_dummies <- model.matrix(~season, data = dummy_flights_with_missing)[, -1]  # Remove intercept
+time_dummies <- model.matrix(~time_period, data = dummy_flights_with_missing)[, -1]
+origin_dummies <- model.matrix(~origin, data = dummy_flights_with_missing)[, -1]
+
+# Combine with the main dataset
+dummy_flights_with_missing <- cbind(dummy_flights_with_missing, season_dummies, time_dummies, origin_dummies)
+
+# Drop original categorical columns if needed
+dummy_flights_with_missing <- dummy_flights_with_missing %>% dplyr::select(-season, -time_period, -origin)
+
+```
+
+
+**Logistic regression**
+```{r, echo=FALSE}
+set.seed(232)
+n <- nrow(dummy_flights_with_missing)
+train_index <- sample(1:n, size = floor(0.6 * n))
+
+cancel_Logistic_train <- dummy_flights_with_missing[train_index, ]
+cancel_Logistic_test <- dummy_flights_with_missing[-train_index, ]
+
+mod2 <- glm(cancel_status ~ ., family = binomial, data = dummy_flights_with_missing)
+summary(mod2)
+
+pred_prob1 <- predict(mod2, newdata = cancel_Logistic_test, type = "response")
+
+pred_class1 <- ifelse(pred_prob1 > 0.5, 1, 0)
+
+table(Predicted = pred_class1, Actual = cancel_Logistic_test$cancel_status)
+
+accuracy <- mean(pred_class1 == cancel_Logistic_test$cancel_status)
+accuracy
+```
+
+#### Key Findings
+
+- **Weather conditions significantly impact cancellations**:
+  - **Wind Speed (+)**: Strongest weather-related predictor, indicating that high winds increase cancellations.
+  - **Humidity (+)**: Higher humidity levels correlate with more cancellations, possibly due to fog or storm conditions.
+  - **Visibility (-)**: Poor visibility is associated with a higher likelihood of cancellations.
+  - **Temperature and precipitation were not statistically significant.**
+  
+- **Seasonality & Scheduling Effects**:
+  - **Winter flights have the highest cancellation probability**, followed by **Summer and Spring**.
+  - **Evening and Afternoon flights are more likely to be canceled**, likely due to operational constraints or worsening weather later in the day.
+  
+- **Airport Factors**:
+  - **Flights from EWR and LGA show significantly higher cancellation probabilities compared to JFK**, possibly due to congestion and operational inefficiencies.
+  - **Larger airports have fewer cancellations compared to small airports.**
+
+**Model Performance**
+
+- **Accuracy = 97.2%**, suggesting a strong predictive model.
+- **Confusion Matrix:**
+  - **Correctly identifies most non-canceled flights.**
+  - **Misses some cancellations due to the extreme imbalance in cancellation rates.**
+- **Weather plays a stronger role in cancellations than in delays**, supporting our hypothesis that airlines cancel flights to avoid extreme delays.
+- **Season, time of day, and airport congestion also contribute to cancellations.**
+  
+  
+**Forward Selection**
+```{r, echo=FALSE}
+# Define the null model (intercept only)
+null_model <- glm(cancel_status ~ 1, family = binomial, data = dummy_flights_with_missing)
+
+# Define the full model (all predictors)
+full_model <- glm(cancel_status ~ ., family = binomial, data = dummy_flights_with_missing)
+
+# Perform forward selection
+forward_model <- step(null_model, scope = list(lower = null_model, upper = full_model),
+                      direction = "forward", trace = F)
+
+# Summary of the final selected model
+summary(forward_model)
+
+# Predictions using the selected model
+pred_prob_forward <- predict(forward_model, newdata = cancel_Logistic_test, type = "response")
+
+# Convert probabilities to class labels
+pred_class_forward <- ifelse(pred_prob_forward > 0.5, 1, 0)
+
+# Confusion matrix
+table(Predicted = pred_class_forward, Actual = cancel_Logistic_test$cancel_status)
+
+# Calculate accuracy
+accuracy_forward <- mean(pred_class_forward == cancel_Logistic_test$cancel_status)
+accuracy_forward
+
+```
+**Using forward selection, we identify the most influential predictors in determining whether a flight will be canceled.**
+
+**Model Performance**
+
+- **Accuracy = 97.2%**, demonstrating strong predictive power.
+- **Confusion Matrix:**
+  - **Correctly classifies nearly all non-canceled flights.**
+  - **Misses some cancellations due to the low overall cancellation rate.**
+- **AIC = 75459**, indicating an optimized model.
+
+#### Key Insights
+
+- **Weather conditions, seasonality, and flight scheduling significantly impact cancellations.**
+- **Flights later in the month are slightly less likely to be canceled, potentially due to operational adjustments.**
+- **LGA and EWR have higher cancellation rates, likely due to congestion and operational inefficiencies.**
+- **Forward selection effectively improves interpretability while maintaining strong predictive accuracy.**
+- **Weather, scheduling, and airport-related factors are critical in predicting cancellations.**
+
+# Conclusion
+Throughout this analysis, we examined the key factors influencing flight delays and cancellations. Our findings indicate that while **weather has a limited effect on delay duration, it significantly impacts cancellation decisions**. Airlines likely preemptively cancel flights to mitigate extreme delays and operational inefficiencies.
+
+Key takeaways include:
+
+- **Flight delays** are primarily influenced by **time of day, seasonality, and airport-specific factors**, with **evening flights and winter months showing the highest delays**.
+- **Flight cancellations** are driven by **adverse weather conditions (wind speed, humidity, visibility), seasonal effects, and airport congestion**.
+- **Machine learning models** provide moderate predictive power, with logistic regression achieving **63.6% accuracy for delays** and **97.2% accuracy for cancellations**.
+
+# Recommendations
+### For Airlines:
+1. **Improve proactive flight management** by leveraging predictive models to anticipate high-risk flights and adjust schedules accordingly.
+2. **Optimize seasonal and time-of-day scheduling** to reduce congestion during high-risk periods, particularly in winter and late evening flights.
+3. **Invest in operational resilience** by improving infrastructure at high-risk airports (EWR, LGA) and increasing flexibility in crew and aircraft allocation during severe weather.
+
+### For Passengers:
+1. **Book flights strategically**:
+   - Prefer **morning flights** to reduce delay and cancellation risks.
+   - **Avoid high-risk airports (EWR, LGA) when possible**.
+2. **Monitor weather conditions and airline updates** closely, especially when traveling during high-risk seasons (winter, summer).
+3. **Opt for flexible ticketing options** to minimize losses in case of cancellations or delays.
+
+By leveraging these insights, both **airlines and passengers can make more informed decisions to minimize travel disruptions and improve overall flight experiences.**
+
+# Authors' contributions 
+
+**Ting-yu Liu**: EDA, Research Aim 1, 2, 3
+
+**Kele Xie**: Research Aim 2, 3
+
+**Winston Zheng**: Research Aim 2, 3
+
+**Nhi Truong**: Research Aim 1, 3, Interpretation
+
+
+
+
